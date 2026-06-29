@@ -1,0 +1,111 @@
+
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                String                   @id @default(uuid())
+  username          String                   @unique
+  passwordHash      String
+  email             String?                  @unique         // Optional fallback for future account recovery
+  
+  // Demographics & Customizations
+  age               Int
+  gender            String
+  area              String                                   // High-level region/city name
+  avatarId          Int                      @default(1)     // Pointer to 1 of 7 local asset graphics
+  bio               String?                  @default("")    // 1-2 line short description
+  
+  // Account Lifecycle States
+  isActive          Boolean                  @default(true)  // For moderation/banning loops without purging records
+  lastSeenAt        DateTime?                                // To fuel "active today" badges later
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  // RELATIONS
+  vents             Vent[]
+  comments          Comment[]
+  notifications     UserPrismaNotification[] @relation("UserNotifications")
+  sentNotifications UserPrismaNotification[] @relation("NotificationSender")
+}
+
+// 2. VENTS & TIMELINE ENTRIES
+model Vent {
+  id            String    @id @default(uuid())
+  content       String
+  status        String    @default("pending")     // "pending" (under review) or "approved" (public timeline)
+  visibility    String    @default("public")      // For future scope expansions (e.g., "private", "draft")
+  isEdited      Boolean   @default(false)         // Flags to show "Edited" label in UI
+  feelsCount    Int       @default(0)             // "I feel you" engagement metric
+  
+  // Safety & Tracking Lifecycles
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?                         // For clean soft-deletes (preserves metrics/integrity)
+
+  // RELATIONS
+  userId        String
+  author        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments      Comment[]
+}
+
+// 3. COMMENTS & NESTED REPLIES
+model Comment {
+  id            String    @id @default(uuid())
+  content       String
+  status        String    @default("approved")
+  isEdited      Boolean   @default(false)
+  likesCount    Int       @default(0)             // Cached counter to keep timeline feeds lightning fast
+  
+  // Lifecycles
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?                         // Preserves comment hierarchy chains when deleted
+
+  // Main Target Relationships
+  ventId        String
+  vent          Vent      @relation(fields: [ventId], references: [id], onDelete: Cascade)
+  
+  userId        String
+  author        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Recursive Threading (Comment-under-comment handling)
+  parentId      String?
+  parent        Comment?  @relation("CommentToReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies       Comment[] @relation("CommentToReplies")
+}
+
+// 4. NOTIFICATIONS TRACKING & METRICS
+model UserPrismaNotification {
+  id          String    @id @default(uuid())
+  type        String                              // Event trigger identifier (e.g., "like", "reply")
+  entityType  String                              // Target system grouping ("vent", "comment")
+  entityId    String?                             // Explicit target matching ID
+  actionUrl   String?                             // Deep link parameters for mobile hardware navigation
+  
+  // Status Details
+  isRead      Boolean   @default(false)
+  readAt      DateTime?                           // Exact tracking mark for notification panels
+  createdAt   DateTime  @default(now())
+
+  // Recipient Identity Link
+  userId      String
+  user        User      @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Sender / Event Instigator Identity Link
+  senderId    String
+  sender      User      @relation("NotificationSender", fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+// 5. GLOBAL APP STATE MANAGEMENT (The App Kill Switch)
+model AppConfig {
+  id            String   @id @default("global_config") // Static ID guarantees exactly one row exists
+  isMaintenance Boolean  @default(false)               // The dynamic state switch
+  updatedAt     DateTime @updatedAt
+}
