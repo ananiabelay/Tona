@@ -1,4 +1,4 @@
-
+// prisma/schema.prisma
 
 datasource db {
   provider = "sqlite"
@@ -9,28 +9,28 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// 1. USER & PROFILE IDENTITY
 model User {
   id                String                   @id @default(uuid())
   username          String                   @unique
   passwordHash      String
-  email             String?                  @unique         // Optional fallback for future account recovery
+  email             String?                  @unique
   
-  // Demographics & Customizations
   age               Int
   gender            String
-  area              String                                   // High-level region/city name
-  avatarId          Int                      @default(1)     // Pointer to 1 of 7 local asset graphics
-  bio               String?                  @default("")    // 1-2 line short description
+  area              String                                   
+  avatarId          Int                      @default(1)     
+  bio               String?                  @default("")    
   
-  // Account Lifecycle States
-  isActive          Boolean                  @default(true)  // For moderation/banning loops without purging records
-  lastSeenAt        DateTime?                                // To fuel "active today" badges later
+  isActive          Boolean                  @default(true)  
+  lastSeenAt        DateTime?                                
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
 
   // RELATIONS
   vents             Vent[]
   comments          Comment[]
+  ventFeels         VentFeel[]               // <-- Added relational link
   notifications     UserPrismaNotification[] @relation("UserNotifications")
   sentNotifications UserPrismaNotification[] @relation("NotificationSender")
 }
@@ -39,20 +39,26 @@ model User {
 model Vent {
   id            String    @id @default(uuid())
   content       String
-  status        String    @default("pending")     // "pending" (under review) or "approved" (public timeline)
-  visibility    String    @default("public")      // For future scope expansions (e.g., "private", "draft")
-  isEdited      Boolean   @default(false)         // Flags to show "Edited" label in UI
-  feelsCount    Int       @default(0)             // "I feel you" engagement metric
+  status        String    @default("approved")     
+  visibility    String    @default("public")      
+  isEdited      Boolean   @default(false)         
+  feelsCount    Int       @default(0)             
   
-  // Safety & Tracking Lifecycles
+  // TAG SYSTEM
+  // SQLite doesn't support native scalar string arrays (String[]). 
+  // Storing them as a comma-separated or space-separated string (e.g., "exams life relationships") 
+  // is the absolute fastest and most lightweight way to do it on SQLite.
+  tags          String    @default("")            
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?                         // For clean soft-deletes (preserves metrics/integrity)
+  deletedAt     DateTime?                         
 
   // RELATIONS
   userId        String
   author        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   comments      Comment[]
+  feels         VentFeel[]               // <-- Added relational link
 }
 
 // 3. COMMENTS & NESTED REPLIES
@@ -61,51 +67,58 @@ model Comment {
   content       String
   status        String    @default("approved")
   isEdited      Boolean   @default(false)
-  likesCount    Int       @default(0)             // Cached counter to keep timeline feeds lightning fast
+  likesCount    Int       @default(0)             
   
-  // Lifecycles
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?                         // Preserves comment hierarchy chains when deleted
+  deletedAt     DateTime?                         
 
-  // Main Target Relationships
   ventId        String
   vent          Vent      @relation(fields: [ventId], references: [id], onDelete: Cascade)
   
   userId        String
   author        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Recursive Threading (Comment-under-comment handling)
   parentId      String?
   parent        Comment?  @relation("CommentToReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies       Comment[] @relation("CommentToReplies")
 }
 
-// 4. NOTIFICATIONS TRACKING & METRICS
+// 4. NOTIFICATIONS TRACKING
 model UserPrismaNotification {
   id          String    @id @default(uuid())
-  type        String                              // Event trigger identifier (e.g., "like", "reply")
-  entityType  String                              // Target system grouping ("vent", "comment")
-  entityId    String?                             // Explicit target matching ID
-  actionUrl   String?                             // Deep link parameters for mobile hardware navigation
+  type        String                              
+  entityType  String                              
+  entityId    String?                             
+  actionUrl   String?                             
   
-  // Status Details
   isRead      Boolean   @default(false)
-  readAt      DateTime?                           // Exact tracking mark for notification panels
+  readAt      DateTime?                           
   createdAt   DateTime  @default(now())
 
-  // Recipient Identity Link
   userId      String
   user        User      @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
 
-  // Sender / Event Instigator Identity Link
   senderId    String
   sender      User      @relation("NotificationSender", fields: [senderId], references: [id], onDelete: Cascade)
 }
 
-// 5. GLOBAL APP STATE MANAGEMENT (The App Kill Switch)
+// 5. GLOBAL APP STATE MANAGEMENT
 model AppConfig {
-  id            String   @id @default("global_config") // Static ID guarantees exactly one row exists
-  isMaintenance Boolean  @default(false)               // The dynamic state switch
+  id            String   @id @default("global_config") 
+  isMaintenance Boolean  @default(false)               
   updatedAt     DateTime @updatedAt
+}
+
+// 6. VENT ENGAGEMENT TRACKING
+model VentFeel {
+  id        String   @id @default(uuid())
+  userId    String
+  ventId    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, ventId])
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vent Vent @relation(fields: [ventId], references: [id], onDelete: Cascade)
 }
