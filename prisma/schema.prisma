@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -9,110 +7,105 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// 1. USER & PROFILE IDENTITY
+// 1. USER
 model User {
-  id                String                   @id @default(uuid())
-  username          String                   @unique
+  id                String   @id @default(uuid())
+  username          String   @unique
   passwordHash      String
-  email             String?                  @unique
-  
+  email             String?  @unique
+
   age               Int
   gender            String
-  area              String                                   
-  avatarId          Int                      @default(1)     
-  bio               String?                  @default("")    
-  
-  isActive          Boolean                  @default(true)  
-  lastSeenAt        DateTime?                                
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
+  area              String
+  avatarId          Int      @default(1)
+  bio               String?  @default("")
 
-  // RELATIONS
+  isActive          Boolean  @default(true)
+  lastSeenAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
   vents             Vent[]
   comments          Comment[]
-  ventFeels         VentFeel[]               // <-- Added relational link
+  ventFeels         VentFeel[]
   notifications     UserPrismaNotification[] @relation("UserNotifications")
   sentNotifications UserPrismaNotification[] @relation("NotificationSender")
-  commentLikes      CommentLike[]            // <-- Add this line inside model User
+  commentLikes      CommentLike[]
 }
 
-// 2. VENTS & TIMELINE ENTRIES
+// 2. VENT
 model Vent {
-  id            String    @id @default(uuid())
-  content       String
-  status        String    @default("approved")     
-  visibility    String    @default("public")      
-  isEdited      Boolean   @default(false)         
-  feelsCount    Int       @default(0)             
-  
-  // TAG SYSTEM
-  // SQLite doesn't support native scalar string arrays (String[]). 
-  // Storing them as a comma-separated or space-separated string (e.g., "exams life relationships") 
-  // is the absolute fastest and most lightweight way to do it on SQLite.
-  tags          String    @default("")            
+  id         String   @id @default(uuid())
+  content    String
+  status     String   @default("approved")
+  visibility String   @default("public")
+  isEdited   Boolean  @default(false)
+  feelsCount Int      @default(0)
+  tags       String   @default("")
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?                         
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
 
-  // RELATIONS
-  userId        String
-  author        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comments      Comment[]
-  feels         VentFeel[]               // <-- Added relational link
+  userId     String
+  author     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  comments   Comment[]
+  feels      VentFeel[]
 }
 
-// 3. COMMENTS & NESTED REPLIES
+// 3. COMMENT
 model Comment {
-  id            String    @id @default(uuid())
-  content       String
-  status        String    @default("approved")
-  isEdited      Boolean   @default(false)
-  likesCount    Int       @default(0)     
-  likes         CommentLike[]        
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?                         
+  id         String   @id @default(uuid())
+  content    String
+  status     String   @default("approved")
+  isEdited   Boolean  @default(false)
+  likesCount Int      @default(0)
 
-  ventId        String
-  vent          Vent      @relation(fields: [ventId], references: [id], onDelete: Cascade)
-  
-  userId        String
-  author        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
 
-  parentId      String?
-  parent        Comment?  @relation("CommentToReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies       Comment[] @relation("CommentToReplies")
+  ventId     String
+  vent       Vent     @relation(fields: [ventId], references: [id], onDelete: Cascade)
+
+  userId     String
+  author     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  parentId   String?
+  parent     Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    Comment[] @relation("CommentReplies")
+
+  likes      CommentLike[]
 }
 
-// 4. NOTIFICATIONS TRACKING
+// 4. NOTIFICATION
 model UserPrismaNotification {
-  id          String    @id @default(uuid())
-  type        String                              
-  entityType  String                              
-  entityId    String?                             
-  actionUrl   String?                             
-  
-  isRead      Boolean   @default(false)
-  readAt      DateTime?                           
-  createdAt   DateTime  @default(now())
+  id         String   @id @default(uuid())
+  type       String
+  entityType String
+  entityId   String?
+  actionUrl  String?
 
-  userId      String
-  user        User      @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  isRead     Boolean  @default(false)
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
 
-  senderId    String
-  sender      User      @relation("NotificationSender", fields: [senderId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  senderId   String
+  sender     User     @relation("NotificationSender", fields: [senderId], references: [id], onDelete: Cascade)
 }
 
-// 5. GLOBAL APP STATE MANAGEMENT
+// 5. CONFIG
 model AppConfig {
-  id            String   @id @default("global_config") 
-  isMaintenance Boolean  @default(false)               
+  id            String   @id @default("global_config")
+  isMaintenance Boolean  @default(false)
   updatedAt     DateTime @updatedAt
 }
 
-// 6. VENT ENGAGEMENT TRACKING
+// 6. VENT FEEL
 model VentFeel {
   id        String   @id @default(uuid())
   userId    String
@@ -125,7 +118,7 @@ model VentFeel {
   vent Vent @relation(fields: [ventId], references: [id], onDelete: Cascade)
 }
 
-// 7. COMMENT ENGAGEMENT TRACKING (Prevents duplicate comment likes)
+// 7. COMMENT LIKE
 model CommentLike {
   id        String   @id @default(uuid())
   userId    String
