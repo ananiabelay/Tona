@@ -33,6 +33,7 @@ model User {
   ventFeels         VentFeel[]               // <-- Added relational link
   notifications     UserPrismaNotification[] @relation("UserNotifications")
   sentNotifications UserPrismaNotification[] @relation("NotificationSender")
+  commentLikes      CommentLike[]            // <-- Add this line inside model User
 }
 
 // 2. VENTS & TIMELINE ENTRIES
@@ -67,7 +68,8 @@ model Comment {
   content       String
   status        String    @default("approved")
   isEdited      Boolean   @default(false)
-  likesCount    Int       @default(0)             
+  likesCount    Int       @default(0)     
+  likes         CommentLike[]        
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -121,4 +123,17 @@ model VentFeel {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   vent Vent @relation(fields: [ventId], references: [id], onDelete: Cascade)
+}
+
+// 7. COMMENT ENGAGEMENT TRACKING (Prevents duplicate comment likes)
+model CommentLike {
+  id        String   @id @default(uuid())
+  userId    String
+  commentId String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, commentId])
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 }

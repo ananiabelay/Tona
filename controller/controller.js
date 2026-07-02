@@ -1,30 +1,127 @@
 // src/controllers/ventController.js
 const prisma = require('../config/db');
 
-// ==========================================
-// 📝 CREATE A NEW VENT (UPDATED WITH TAGS)
-// ==========================================
+const getVentById = async (req, res) => {
+  try {
+    const { id: ventId } = req.params;
+    const userId = req.user.id;
+
+    // 1. Fetch the target vent with its author details and comment counts
+    const vent = await prisma.vent.findUnique({
+      where: { 
+        id: ventId, 
+        deletedAt: null 
+      },
+      include: {
+        author: {
+          select: {
+            id: true,
+            username: true,
+            area: true,
+            avatarId: true,
+          }
+        },
+        _count: {
+          select: { comments: true }
+        },
+        feels: {
+          where: { userId }
+        }
+      }
+    });
+
+    if (!vent) {
+      return res.status(404).json({ success: false, message: "Vent not found." });
+    }
+
+    // 2. Fetch the comments associated with this specific vent
+    const comments = await prisma.comment.findMany({
+      where: { ventId },
+      orderBy: { createdAt: 'desc' }, // Newest comments first
+      select: {
+        id: true,
+        content: true,
+        createdAt: true,
+        author: {
+          select: {
+            area: true
+          }
+        }
+      }
+    });
+
+    // 3. Format payload cleanly for the Expo screen
+    const formattedVent = {
+      id: vent.id,
+      content: vent.content,
+      createdAt: vent.createdAt,
+      feelsCount: vent.feelsCount,
+      commentCount: vent._count.comments,
+
+      location: vent.author?.area || null,
+      avatarId: vent.author?.avatarId || null,
+
+      authorId: vent.author?.id || null,
+      authorName: vent.author?.username || null,
+
+      hasFelt: vent.feels.length > 0
+    };
+
+    const formattedComments = comments.map(c => ({
+      id: c.id,
+      content: c.content,
+      createdAt: c.createdAt,
+      location: c.author?.area || null
+    }));
+
+    // Send it back matching the React Native payload state structure
+    res.status(200).json({
+      success: true,
+      vent: formattedVent,
+      comments: formattedComments
+    });
+
+  } catch (error) {
+    console.error("Fetch Single Vent Error:", error);
+    res.status(500).json({ success: false, message: "Failed to retrieve thread details." });
+  }
+};
 const createVent = async (req, res) => {
   try {
-    const { content, tags } = req.body; // tags expected as an array: ["academic", "vent"]
+    const { content, tags } = req.body; // 1. Grab tags directly from the incoming body
+    const userId = req.user.id;
 
     if (!content || content.trim().length === 0) {
       return res.status(400).json({ success: false, message: "Vent content cannot be empty." });
     }
 
-    // Convert array to a clean space-separated string for SQLite tracking ("academic vent")
-    let tagsString = "";
-    if (tags && Array.isArray(tags)) {
-      tagsString = tags.map(t => t.trim().toLowerCase().replace(/#/g, '')).join(' ');
+    // 2. 🛡️ Bulletproof Tag / Niche Parser
+    let processedTagsString = "";
+    
+    if (tags) {
+      if (Array.isArray(tags)) {
+        // If frontend sends an array: ["coding", "Addis Devs"] -> "coding addisdevs"
+        processedTagsString = tags
+          .map(t => t.trim().toLowerCase().replace(/\s+/g, '')) // Lowercase and strip internal spaces
+          .filter(t => t.length > 0)                            // Remove any empty strings
+          .join(' ');                                           // Join with a single space space
+      } else if (typeof tags === 'string' && tags.trim().length > 0) {
+        // If frontend sends a raw string: "coding, exams" or "coding exams"
+        processedTagsString = tags
+          .toLowerCase()
+          .replace(/,/g, ' ')                                   // Swap commas for spaces
+          .trim()
+          .replace(/\s+/g, ' ');                                // Normalize double spaces to single spaces
+      }
     }
 
+    // 3. Save directly to the database row
     const newVent = await prisma.vent.create({
       data: {
         content,
-        userId: req.user.id,
-        tags: tagsString,
-        status: "approved",
-        visibility: "public"
+        userId,
+        status: "pending",
+        tags: processedTagsString || null // Saves the sanitized string or leaves it null
       }
     });
 
@@ -34,6 +131,7 @@ const createVent = async (req, res) => {
       vent: {
         id: newVent.id,
         content: newVent.content,
+        // 🪄 Send it right back to the frontend as a clean array instantly
         tags: newVent.tags ? newVent.tags.split(' ') : [],
         createdAt: newVent.createdAt
       }
@@ -56,17 +154,24 @@ const getMyLikedVents = async (req, res) => {
     const likedRelationships = await prisma.ventFeel.findMany({
       where: { userId },
       include: {
-        vent: {
-          include: {
-            author: {
-              select: { avatarId: true, area: true }
-            },
-            _count: {
-              select: { comments: true }
-            }
-          }
+  vent: {
+    include: {
+      author: {
+        select: {
+          id: true,
+          username: true,
+          avatarId: true,
+          area: true
         }
       },
+      _count: {
+        select: {
+          comments: true
+        }
+      }
+    }
+  }
+},
       orderBy: {
         createdAt: 'desc' // Shows most recently liked posts first
       }
@@ -102,69 +207,102 @@ const getMyLikedVents = async (req, res) => {
 };
 
 // Keep your existing getTimeline and toggleFeelVent methods intact below...
+// src/controllers/ventController.js
+
 const getTimeline = async (req, res) => {
   try {
-    // Pull active, approved vents. Sort by latest first.
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const skip = (page - 1) * limit;
+
+    const userId = req.user.id;
+
+    // Fetch timeline
     const vents = await prisma.vent.findMany({
       where: {
         status: "approved",
-        deletedAt: null // Excludes soft-deleted posts
+        deletedAt: null
       },
       orderBy: {
-        createdAt: 'desc'
+        createdAt: "desc"
       },
+      skip,
+      take: limit,
       select: {
         id: true,
         content: true,
         feelsCount: true,
         createdAt: true,
         isEdited: true,
-        // We only fetch masked user info to maintain public anonymity
+        tags: true,
+
+        // Author details
         author: {
           select: {
+            id: true,
+            username: true,
             avatarId: true,
-            area: true // Displays context like "Addis Ababa" next to the post
+            area: true
           }
         },
-        // Pull back a fast relational count of how many replies exist
+
         _count: {
-          select: { comments: true }
+          select: {
+            comments: true
+          }
+        },
+
+        feels: {
+          where: {
+            userId
+          }
         }
       }
     });
 
-    // Format output cleanly for our React Native UI mapping
-    const formattedFeeds = vents.map(vent => ({
+    const formattedFeeds = vents.map((vent) => ({
       id: vent.id,
       content: vent.content,
+
+      // Author information
+      userId: vent.author.id,
+      username: vent.author.username,
+      avatarId: vent.author.avatarId,
+      location: vent.author.area,
+
+      // Vent information
       feelsCount: vent.feelsCount,
       commentCount: vent._count.comments,
+      tags: vent.tags ? vent.tags.split(" ") : [],
       createdAt: vent.createdAt,
       isEdited: vent.isEdited,
-      location: vent.author.area,
-      avatarId: vent.author.avatarId
+      hasFelt: vent.feels.length > 0
     }));
 
     res.status(200).json({
       success: true,
+      page,
+      limit,
       count: formattedFeeds.length,
       timeline: formattedFeeds
     });
 
   } catch (error) {
-    console.error("Fetch Timeline Error:", error);
-    res.status(500).json({ success: false, message: "Failed to load timeline feed." });
+    console.error("Fetch Paginated Timeline Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load timeline feed."
+    });
   }
 };
-// ==========================================
-// ❤️ TOGGLE "I FEEL YOU" ENGAGEMENT METRIC
-// ==========================================
+
 const toggleFeelVent = async (req, res) => {
   try {
     const { id: ventId } = req.params;
-    const userId = req.user.id; // Pulled from your active JWT token
+    const userId = req.user.id;
 
-    // 1. Verify the target vent exists
+    // 1. Verify target vent exists
     const vent = await prisma.vent.findUnique({
       where: { id: ventId, deletedAt: null }
     });
@@ -173,35 +311,48 @@ const toggleFeelVent = async (req, res) => {
       return res.status(404).json({ success: false, message: "This vent no longer exists." });
     }
 
-    // 2. Check if this specific user has already liked this post
+    // 2. Check for existing like tracking row
     const existingFeel = await prisma.ventFeel.findUnique({
       where: {
-        userId_ventId: { userId, ventId } // This is our unique compound key guard!
+        userId_ventId: { userId, ventId }
       }
     });
 
     let message = "";
     let countChange = 0;
 
-    // 3. Update everything in a safe transaction block
+    // 3. Execute core logic inside the atomic transaction block
     await prisma.$transaction(async (tx) => {
       if (existingFeel) {
-        // If it exists, they are unliking it
+        // Unliking
         await tx.ventFeel.delete({
           where: { id: existingFeel.id }
         });
         countChange = -1;
         message = "Support retracted.";
       } else {
-        // If it doesn't exist, they are liking it
+        // Liking
         await tx.ventFeel.create({
           data: { userId, ventId }
         });
         countChange = 1;
         message = "Supported successfully.";
+
+        // 🔔 LIVE NOTIFICATION TRIGGER (Safely inside the transaction block using 'tx'!)
+        if (vent.userId !== userId) { 
+          await tx.userPrismaNotification.create({
+            data: {
+              type: "feel",
+              entityType: "vent",
+              entityId: ventId,
+              userId: vent.userId, // Recipient (Post Owner)
+              senderId: userId     // Actor (Liker)
+            }
+          });
+        }
       }
 
-      // Modify the core count field directly on the Vent row
+      // Update the main aggregate counter safely on the Vent table
       await tx.vent.update({
         where: { id: ventId },
         data: {
@@ -212,7 +363,7 @@ const toggleFeelVent = async (req, res) => {
       });
     });
 
-    // 4. Fetch the final updated value
+    // 4. Read final updated count state
     const updatedVent = await prisma.vent.findUnique({
       where: { id: ventId },
       select: { feelsCount: true }
@@ -231,6 +382,93 @@ const toggleFeelVent = async (req, res) => {
   }
 };
 
+const getMyVents = async (req, res) => {
+  try {
+    const userId = req.user.id; // Pulled from protected auth token
 
-module.exports = { createVent, getTimeline, toggleFeelVent , getMyLikedVents };
+    const myVents = await prisma.vent.findMany({
+      where: { 
+        userId, 
+        deletedAt: null // Don't show their deleted posts
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: {
+          select: { comments: true }
+        }
+      }
+    });
+
+    const formattedVents = myVents.map(v => ({
+      id: v.id,
+      content: v.content,
+      feelsCount: v.feelsCount,
+      commentCount: v._count.comments,
+      tags: v.tags ? v.tags.split(' ') : [],
+      createdAt: v.createdAt,
+      status: v.status,
+      visibility: v.visibility
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: formattedVents.length,
+      vents: formattedVents
+    });
+
+  } catch (error) {
+    console.error("Get My Vents Error:", error);
+    res.status(500).json({ success: false, message: "Failed to load your posts history." });
+  }
+};
+
+// ==========================================
+// 🗑️ SECURE SOFT-DELETE A USER'S OWN VENT
+// ==========================================
+const deleteVent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // 1. Find the target post
+    const vent = await prisma.vent.findUnique({
+      where: { id }
+    });
+
+    if (!vent || vent.deletedAt !== null) {
+      return res.status(404).json({ success: false, message: "Vent not found or already deleted." });
+    }
+
+    // 2. Security Check: Ensure the person trying to delete it actually owns it!
+    if (vent.userId !== userId) {
+      return res.status(403).json({ success: false, message: "Unauthorized. You can only delete your own vents." });
+    }
+
+    // 3. Perform the soft delete update
+    await prisma.vent.update({
+      where: { id },
+      data: { deletedAt: new Date() }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Vent successfully removed from your timeline."
+    });
+
+  } catch (error) {
+    console.error("Delete Vent Error:", error);
+    res.status(500).json({ success: false, message: "Failed to delete vent." });
+  }
+};
+
+// Update your export list at the very bottom of the file!
+module.exports = { 
+  createVent, 
+  getTimeline, 
+  toggleFeelVent, 
+  getMyLikedVents, 
+  getMyVents, 
+  deleteVent ,
+  getVentById
+};
 

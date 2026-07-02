@@ -1,11 +1,20 @@
-const userRoutes = require('./routes/userRoutes');
+const userRoutes = require('./routes/userroutes');
 const prisma = require('./config/db');
 const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/authRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
-const ventRoutes = require('./routes/ventRoutes'); // <
+const ventRoutes = require('./routes/ventRoutes'); 
+const commentRoutes = require('./routes/commentrouter');
+const notificationRoutes = require('./routes/notificationroutes');
+const appRoutes = require('./routes/appRoutes');
+const adminRoutes = require('./routes/admin');
+
+
+
+
+
 require('dotenv').config();
 
 
@@ -53,8 +62,14 @@ app.listen(PORT, () => {
   console.log(`🚀 Venting App Backend live on Port: ${PORT}`);
   console.log(`=========================================`);
 });
+ 
 
+app.use('/api', commentRoutes);
 
 app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
+app.use('/api/user', userRoutes);
 app.use('/api/vents', ventRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/status', appRoutes);
+app.use('/api/admin', adminRoutes);
+
