@@ -1,0 +1,31 @@
+{
+  "name": "tona",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ananiabelay/Tona.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ananiabelay/Tona/issues"
+  },
+  "homepage": "https://github.com/ananiabelay/Tona#readme",
+  "dependencies": {
+    "@prisma/client": "^7.8.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "prisma": "^7.8.0"
+  }
+}
